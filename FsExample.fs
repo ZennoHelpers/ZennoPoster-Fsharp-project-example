@@ -6,94 +6,84 @@ open ZennoLab.CommandCenter
 open ZennoLab.Emulation
 open ZennoLab.InterfacesLibrary.ProjectModel
 open ZennoLab.InterfacesLibrary.ProjectModel.Enums
+open Example.Extensions
+
+type Lang = En | Ru
 
 type TemplateExample(instance: Instance, project: IZennoPosterProjectModel) =
 
+  member this.Run() =
+    
     let tab = instance.ActiveTab
 
-    let toLog x = project.SendInfoToLog x
+    let toLog = project.SendInfoToLog
 
-    let openPage url =
-        tab.Navigate(url, url)
-        if tab.IsBusy then tab.WaitDownloading()
-
-    let foundAndClick (xPath) =
-        let he = tab.FindElementByXPath(xPath, 0)
-        if he.IsVoid then
-            failwith (xPath + " не найден")
-        
-        tab.FullEmulationMouseMoveToHtmlElement he
-        tab.FullEmulationMouseClick("left", "click")
-
-    let lang = project.Profile.Language
     let langState =
-        if lang.Equals("ru", StringComparison.CurrentCultureIgnoreCase) then 1
-        elif lang.Equals("en", StringComparison.CurrentCultureIgnoreCase) then 2
-        else failwith ("Неизвестный язык профиля: " + lang)
-        
-  //let lang = "En"
-  //let lang = "Ru"
-    do toLog lang
+      match project.Profile.Language with
+      | lang when lang.CompareStr("en") -> Lang.En
+      | lang when lang.CompareStr("ru") -> Lang.Ru
+      | _ -> failwith ("Неподдерживаемый язык")
 
-    let langSet (ru, en) =
-        match langState with
-        | 1 -> ru | 2 -> en
-        | _ -> failwith ("langState за пределами: " + lang)
+    let getLangWord (ru, en) =
+      match langState with
+      | Lang.Ru -> ru
+      | Lang.En -> en
 
-    member this.Start() =
+    toLog "Установка белого списка url"
+    instance.SetContentPolicy(policy = "WhiteList", regexs = [| "lessons.zennolab.com" |])
 
-        toLog "Установка белого списка url"
-        instance.SetContentPolicy(policy = "WhiteList", regexs = [| "lessons.zennolab.com" |])
+    toLog "Открытие страницы в соответствии с профилем"
+    tab.OpenPage ("https://lessons.zennolab.com/" + getLangWord("ru", "en") + "/index")
 
-        toLog "Открытие страницы в соответствии с профилем"
-        openPage ("https://lessons.zennolab.com/" + lang.ToLower() + "/index")
+    let list = [|
+      "Windows";
+      "*nix";
+      "Mac OS";
+      getLangWord ("Другая", "Other");
+      getLangWord ("Россия", "USA");
+    |]
 
-        let list = [|
-          "Windows";
-          "*nix";
-          "Mac OS";
-          langSet ("Другая", "Other");
-          langSet ("Россия", "USA");
-        |]
+    toLog "Выбор элементов"
+    
+    for text in list do
+      toLog ("Выбор " + text)
+      tab.FoundAndClick ("id('inputs')//h2[contains(text(), '" + text + "')]/preceding-sibling::input[1]")
 
-        toLog "Выбор элементов"
-        // Применение метода к каждому элементу массива list
-        Array.iter (fun text ->
-            toLog ("Выбор " + text)
-            foundAndClick ("id('inputs')//h2[contains(text(), '" + text + "')]/preceding-sibling::input[1]")) list
+    toLog "Ввод текста"
+    tab.FoundAndClick "//textarea[@name='text']"
+    
+    instance.SendText (project.Profile.Name + " " +
+                       project.Profile.Surname + " " +
+                       getLangWord ("возраст:", "age:") + " " +
+                       project.Profile.Age.ToString(), 50)
 
-        toLog "Ввод текста"
-        foundAndClick "//textarea[@name='text']"
-        instance.SendText (project.Profile.Name + " " +
-                           project.Profile.Surname + " " +
-                           langSet ("возраст:", "age:") + " " +
-                           project.Profile.Age.ToString(), 50)
+    toLog "Выбор пола"
+    if project.Profile.Sex = ProfileSex.Male then
+        tab.FoundAndClick "//select[@name='gender']"
+        Emulator.SendKey(tab.Handle, Windows.Forms.Keys.Up, KeyboardEvent.Press) |> ignore
 
-        toLog "Выбор пола"
-        if project.Profile.Sex = ProfileSex.Male then
-            foundAndClick "//select[@name='gender']"
-            Emulator.SendKey(tab.Handle, Windows.Forms.Keys.Up, KeyboardEvent.Press) |> ignore
+    toLog "Выбор языка"
+    tab.FoundAndClick ("//option[text()='" + getLangWord ("Русский", "English") + "']")
 
-        toLog "Выбор языка"
-        foundAndClick ("//option[text()='" + langSet ("Русский", "English") + "']")
-
-        toLog "Выбор возраста"
-        let age = project.Profile.Age
-        let option =
-            if age < 16 then 1
-            elif 16 <= age && age <= 30 then 2
-            elif 31 <= age && age <= 60 then 3
-            else 4
-        foundAndClick ("//option[text()='" + langSet ("Возраст:", "Age:") + "']/following-sibling::option[" + (string) option + "]")
+    toLog "Выбор возраста"
+    let age = project.Profile.Age
+    let option =
+        if age < 16 then 1
+        elif 16 <= age && age <= 30 then 2
+        elif 31 <= age && age <= 60 then 3
+        else 4
+    tab.FoundAndClick ("//option[text()='" + getLangWord ("Возраст:", "Age:") + "']/following-sibling::option[" + (string) option + "]")
+    0
 
 
 type public Main() =
 
     interface IZennoCustomCode with
-        member this.ExecuteCode(instance: Instance, project: IZennoPosterProjectModel): int =
-            (new TemplateExample(instance, project)).Start()
-            0
+      member this.ExecuteCode(instance: Instance, project: IZennoPosterProjectModel): int =
+        
+        TemplateExample(instance, project).Run()
+        
 
     interface IZennoCustomEndCode with
-        member this.GoodEnd(instance, project) = ()
-        member this.BadEnd(instance, project) = ()
+      member this.GoodEnd(instance, project) = ()
+      member this.BadEnd(instance, project) = ()
